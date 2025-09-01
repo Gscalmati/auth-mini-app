@@ -1,6 +1,7 @@
 import DBLocal from 'db-local';
 import crypto from 'crypto';
-import { type } from 'os';
+import bcrypt from 'bcrypt';
+import { UserValidations } from './validations/UserValidations.js';
 
 const { Schema } = DBLocal({ path: "./db" });
 
@@ -13,23 +14,37 @@ const User = Schema('User', {
 export class UserRepository {
     static create ({ username, password }) {
         // Validaciones -> zod?
-        if (typeof username !== 'string') throw new Error("El nombre de usuario debe ser un string");
-        if (username.length < 6) throw new Error("El nombre de usuario debe tener más de 6 caracteres");
+        UserValidations.username(username);
+        UserValidations.password(password);
         
-        if (typeof password !== 'string') throw new Error("La contraseña debe ser un string");
-        if (password.length < 8) throw new Error("La contraseña debe tener más de 8 caracteres");
-
         // Validar existencia del usuario
         const user = User.findOne({ username });
         if (user) throw new Error("El usuario ya existe");
 
+        const hashedPassword = bcrypt.hashSync(password, 10); // Esto bloquea el thread principal -> es costoso
+        //const hashedPassword = bcrypt.hash(password, 10); // Esto no lo bloquea el thread principal -> una promesa, hay que hacer await acá y en el uso del UserRepository
+
         // Crear id único
         const idNuevo = crypto.randomUUID();
 
-        User.create({ _id: idNuevo, username, password }).save();
+        User.create({ _id: idNuevo, username, password: hashedPassword }).save();
         
         return idNuevo;
     }
 
-    static login ({ username, password }) {}
+    static login ({ username, password }) {
+        UserValidations.username(username);
+        UserValidations.password(password);
+        
+        // Validar existencia del usuario
+        const user = User.findOne({ username });
+        if (!user) throw new Error("El usuario no existe");
+
+        if (!bcrypt.compareSync(password, user.password)) throw new Error("Contraseña inválida");
+
+        // Forma simple de "volar" el password del obj user
+        const { password: _, ...publicUser} = user;
+
+        return publicUser;
+    }
 }
